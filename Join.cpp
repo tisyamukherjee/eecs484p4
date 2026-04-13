@@ -1,7 +1,7 @@
 #include "Join.hpp"
 
 #include <vector>
-#include <iostream>
+
 using namespace std;
 
 /*
@@ -110,48 +110,81 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 			partitions[out_buff].add_right_rel_page(disk_page_id);
 		}
 	}
-	// int mem_page = 0;
-	// int left_rel_index = left_rel.first; 
 
-
-	// // load in pages into memory 
-	// while (left_rel_index < left_rel.second && mem_page < MEM_SIZE_IN_PAGE) {
-	// 	mem->loadFromDisk(disk, left_rel_index, mem_page);
-	// 	left_rel_index++;
-	// 	mem_page++;
-	// }
-	// // go through pages loaded into memory
-	// for (uint p = 0; p < MEM_SIZE_IN_PAGE; ++p) {
-	// 	Page *curr_page = mem->mem_page(p);
-	// 	for (uint r = 0; r < curr_page->size(); ++r) {
-	// 		Record curr_record = curr_page->get_record(r);
-	// 		uint hash_value = curr_record.partition_hash(); // hash on tuple in r
-	// 		// load record into a page? 
-	// 		partitions[hash_value].add_left_rel_page(p);
-	// 	}	
-	// }
-
-	// for (int partition = 0; partition < partitions.size(); ++partition) {
-	// 	vector<uint> left_rel_pages = partitions[partition].get_left_rel();
-	// 	for (uint page_id : left_rel_pages) {
-			
-	// 	}
-	// }
-	
-
-	        // partition s using hash function
-	        // bring a page of s to memory at a time
-	        // store each tuple hash(s) into output bucket
-	        // bucket fills --> write to disk
-	        return partitions;
+	// partition s using hash function
+	// bring a page of s to memory at a time
+	// store each tuple hash(s) into output bucket
+	// bucket fills --> write to disk
+	return partitions;
 }
 
 /*
  * Input: Disk, Memory, Vector of Buckets after partition
  * Output: Vector of disk page ids for join result
  */
+
+ /*
+ PROBE
+for k = 1 to B - 1 do
+	for each tuple r in R_k do
+		put r in bucket h2(r)
+	for each tuple s in S_k do
+		for each tuple r in bucket h2(s) do 
+			if r = s then
+				put (r,s) in the output relation
+				*/
 vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 	// TODO: implement probe phase
 	vector<uint> disk_pages; // placeholder
+	std::unordered_map<int, vector<Record>> r_hash;
+	// go through each page in r
+	uint out_buffer_page = 1;
+	uint input_buffer = 0;
+	for (uint partition = 0; partition < partitions.size(); partition++) {
+		for (uint page_no = 0; page_no < partitions[partition].num_left_rel_record; page_no++) {
+			Page *curr_page = mem->mem_page(partitions[partition].get_left_rel()[page_no]);
+			
+			// for every tuple r in R_k
+			for (uint r_tuple = 0; r_tuple < RECORDS_PER_PAGE; r_tuple++) {
+				Record curr_tuple = curr_page->get_record(r_tuple);
+				uint hash_idx = curr_tuple.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+				if (r_hash.find(hash_idx) != r_hash.end()) { // checks if hash_idx exists 
+					r_hash[hash_idx].push_back(curr_tuple);
+				} else {
+					r_hash[hash_idx] = 
+				}
+			}
+			for (uint s_page = 0; s_page < partitions[partition].num_right_rel_record; s_page++) {
+				mem->loadFromDisk(disk, s_page, input_buffer);
+				// for every tuple s in S_k
+				for(uint s_tuple = 0; s_tuple < mem->mem_page(input_buffer)->size(); s_tuple++) {
+					Record curr_s_tuple = mem->mem_page(partitions[partition].get_right_rel()[page_no])->get_record(s_tuple);
+					uint s_hash_idx = curr_s_tuple.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+					
+					vector<Record> same_hash = r_hash[s_hash_idx];
+					
+					for(uint r_tuple = 0; r_tuple < same_hash.size(); r_tuple++) {
+						if (mem->mem_page(out_buffer_page)->full()) { // flush to disk
+							int disk_page = mem->flushToDisk(disk, out_buffer_page);
+							disk_pages.push_back(disk_page);
+							out_buffer_page += 1;
+						}
+						if (same_hash[r_tuple] == curr_s_tuple) {
+							mem->mem_page(out_buffer_page)->loadPair(same_hash[r_tuple], curr_s_tuple);
+						}
+					}
+					
+				}
+			}
+		}
+	}
+	// flush output buffers to disk --> occurs if there are any remaining tuples 
+	if (!(mem->mem_page(out_buffer_page)->empty())) { // if the buffer is not empty
+		int disk_page = mem->flushToDisk(disk, out_buffer_page);
+		disk_pages.push_back(disk_page);
+	}
+
+
 	return disk_pages;
 }
+
