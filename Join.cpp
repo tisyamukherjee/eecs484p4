@@ -1,5 +1,6 @@
 #include "Join.hpp"
 
+#include <unordered_map>
 #include <vector>
 
 using namespace std;
@@ -31,17 +32,17 @@ for k = 1 to B - 1 do
 				put (r,s) in the output relation
 */
 
-// left_rel == RELATION R left_rel.first is starting page of the memory, .second is ending 
+// left_rel == RELATION R left_rel.first is starting page of the memory, .second is ending
 // right_rel == RELATION S
 vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<uint, uint> right_rel) {
 	// TODO: implement partition phase
 	vector<Bucket> partitions(MEM_SIZE_IN_PAGE - 1, Bucket(disk)); // partitions for PROBE
 
 	// assuming disk is loaded with relation
-	// loop through the disk page, take a page into input buffer, hash the tuples 
+	// loop through the disk page, take a page into input buffer, hash the tuples
 
 	// RELATION R
-	int input_buffer = 0; 
+	int input_buffer = 0;
 	int output_buffer_id = 0;
 	for (uint page = left_rel.first; page < left_rel.second; page++) { // for each page in the disk holding R
 		// load a page of R into input buffer
@@ -52,22 +53,21 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 			Record curr_tuple = mem->mem_page(input_buffer)->get_record(tuple);
 
 			// get the hash value of the output buffer, mod mem_size_in_page - 1 bc spec said
-			output_buffer_id = curr_tuple.partition_hash() % (MEM_SIZE_IN_PAGE - 1); 
-			
-			uint out_buffer_page = output_buffer_id + 1; // memory where output buffer is located 
+			output_buffer_id = curr_tuple.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
+
+			uint out_buffer_page = output_buffer_id + 1; // memory where output buffer is located
 			// + 1 bc 0 is used from input_buffer
-	
+
 			if (mem->mem_page(out_buffer_page)->full()) { // flush to disk
 				uint disk_page_id = mem->flushToDisk(disk, out_buffer_page);
 				partitions[output_buffer_id].add_left_rel_page(disk_page_id);
 			}
 			// add tuple into the buffer
 			mem->mem_page(out_buffer_page)->loadRecord(curr_tuple);
-
 		}
 	}
 
-	// flush output buffers to disk --> occurs if there are any remaining tuples 
+	// flush output buffers to disk --> occurs if there are any remaining tuples
 	for (uint out_buff = 0; out_buff < MEM_SIZE_IN_PAGE - 1; out_buff++) {
 		if (!(mem->mem_page(out_buff + 1)->empty())) { // if the buffer is not empty
 			uint disk_page_id = mem->flushToDisk(disk, out_buff + 1);
@@ -75,9 +75,8 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 		}
 	}
 
-
 	// RIGHT RELATION --> RELATION S
-	input_buffer = 0; 
+	input_buffer = 0;
 	output_buffer_id = 0;
 	for (uint page = right_rel.first; page < right_rel.second; page++) { // for each page in the disk holding S
 		// load a page of S into input buffer
@@ -88,22 +87,21 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 			Record curr_tuple = mem->mem_page(input_buffer)->get_record(tuple);
 
 			// get the id of the output buffer, mod mem_size_in_page bc spec said
-			output_buffer_id = curr_tuple.partition_hash() % (MEM_SIZE_IN_PAGE - 1); 
-			
-			uint out_buffer_page = output_buffer_id + 1; // memory where output buffer is located 
+			output_buffer_id = curr_tuple.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
+
+			uint out_buffer_page = output_buffer_id + 1; // memory where output buffer is located
 			/* Return true if this page is full of data records */
-	
+
 			if (mem->mem_page(out_buffer_page)->full()) { // flush to disk
 				uint disk_page_id = mem->flushToDisk(disk, out_buffer_page);
 				partitions[output_buffer_id].add_right_rel_page(disk_page_id);
 			}
 			// add tuple into the buffer
 			mem->mem_page(out_buffer_page)->loadRecord(curr_tuple);
-
 		}
 	}
 
-	// flush output buffers to disk --> occurs if there are any remaining tuples 
+	// flush output buffers to disk --> occurs if there are any remaining tuples
 	for (uint out_buff = 0; out_buff < MEM_SIZE_IN_PAGE - 1; out_buff++) {
 		if (!(mem->mem_page(out_buff + 1)->empty())) { // if the buffer is not empty
 			uint disk_page_id = mem->flushToDisk(disk, out_buff + 1);
@@ -123,7 +121,7 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
  * Output: Vector of disk page ids for join result
  */
 
- /*
+/*
  PROBE
 for k = 1 to B - 1 do
 	for each tuple r in R_k do
@@ -136,55 +134,66 @@ for k = 1 to B - 1 do
 vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 	// TODO: implement probe phase
 	vector<uint> disk_pages; // placeholder
-	std::unordered_map<int, vector<Record>> r_hash;
+
 	// go through each page in r
 	uint out_buffer_page = 1;
 	uint input_buffer = 0;
 	for (uint partition = 0; partition < partitions.size(); partition++) {
-		for (uint page_no = 0; page_no < partitions[partition].num_left_rel_record; page_no++) {
-			Page *curr_page = mem->mem_page(partitions[partition].get_left_rel()[page_no]);
-			
+		unordered_map<int, vector<Record>> r_hash;
+
+		// hash smaller set
+		vector<uint> hash_rel_pages;
+		vector<uint> probe_rel_pages;
+		if (partitions[partition].get_left_rel().size() < partitions[partition].get_right_rel().size()) {
+			hash_rel_pages = partitions[partition].get_left_rel();
+			probe_rel_pages = partitions[partition].get_right_rel();
+		} else {
+			hash_rel_pages = partitions[partition].get_right_rel();
+			probe_rel_pages = partitions[partition].get_left_rel();
+		}
+
+		for (uint page_no = 0; page_no < hash_rel_pages.size(); page_no++) {
+			mem->loadFromDisk(disk, hash_rel_pages[page_no], input_buffer);
+			Page* curr_page = mem->mem_page(input_buffer);
+
 			// for every tuple r in R_k
-			for (uint r_tuple = 0; r_tuple < RECORDS_PER_PAGE; r_tuple++) {
+			for (uint r_tuple = 0; r_tuple < curr_page->size(); r_tuple++) {
 				Record curr_tuple = curr_page->get_record(r_tuple);
 				uint hash_idx = curr_tuple.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
-				if (r_hash.find(hash_idx) != r_hash.end()) { // checks if hash_idx exists 
+				if (r_hash.find(hash_idx) != r_hash.end()) { // checks if hash_idx exists
 					r_hash[hash_idx].push_back(curr_tuple);
 				} else {
-					r_hash[hash_idx] = 
+					r_hash[hash_idx] = vector<Record>{curr_tuple};
 				}
 			}
-			for (uint s_page = 0; s_page < partitions[partition].num_right_rel_record; s_page++) {
-				mem->loadFromDisk(disk, s_page, input_buffer);
-				// for every tuple s in S_k
-				for(uint s_tuple = 0; s_tuple < mem->mem_page(input_buffer)->size(); s_tuple++) {
-					Record curr_s_tuple = mem->mem_page(partitions[partition].get_right_rel()[page_no])->get_record(s_tuple);
-					uint s_hash_idx = curr_s_tuple.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
-					
-					vector<Record> same_hash = r_hash[s_hash_idx];
-					
-					for(uint r_tuple = 0; r_tuple < same_hash.size(); r_tuple++) {
-						if (mem->mem_page(out_buffer_page)->full()) { // flush to disk
-							int disk_page = mem->flushToDisk(disk, out_buffer_page);
-							disk_pages.push_back(disk_page);
-							out_buffer_page += 1;
-						}
-						if (same_hash[r_tuple] == curr_s_tuple) {
-							mem->mem_page(out_buffer_page)->loadPair(same_hash[r_tuple], curr_s_tuple);
+		}
+		for (uint s_page = 0; s_page < probe_rel_pages.size(); s_page++) {
+			mem->loadFromDisk(disk, probe_rel_pages[s_page], input_buffer);
+			// for every tuple s in S_k
+			for (uint s_tuple = 0; s_tuple < mem->mem_page(input_buffer)->size(); s_tuple++) {
+				Record curr_s_tuple = mem->mem_page(input_buffer)->get_record(s_tuple);
+				uint s_hash_idx = curr_s_tuple.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+
+				if (r_hash.find(s_hash_idx) != r_hash.end()) {
+					for (uint r_tuple = 0; r_tuple < r_hash[s_hash_idx].size(); r_tuple++) {
+
+						if (r_hash[s_hash_idx][r_tuple] == curr_s_tuple) {
+							if (mem->mem_page(out_buffer_page)->full()) { // flush to disk
+								int disk_page = mem->flushToDisk(disk, out_buffer_page);
+								disk_pages.push_back(disk_page);
+							}
+							mem->mem_page(out_buffer_page)->loadPair(r_hash[s_hash_idx][r_tuple], curr_s_tuple);
 						}
 					}
-					
 				}
 			}
 		}
 	}
-	// flush output buffers to disk --> occurs if there are any remaining tuples 
+	// flush output buffers to disk --> occurs if there are any remaining tuples
 	if (!(mem->mem_page(out_buffer_page)->empty())) { // if the buffer is not empty
 		int disk_page = mem->flushToDisk(disk, out_buffer_page);
 		disk_pages.push_back(disk_page);
 	}
 
-
 	return disk_pages;
 }
-
